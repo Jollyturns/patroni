@@ -42,6 +42,7 @@ class Client(etcd.Client):
         Later, during next `api_execute` call we will forcefully update machines_cache"""
         try:
             ret = super(Client, self).machines
+            # logging.info("Got machines from etcd.Client: %s", ret)
             random.shuffle(ret)
             return ret
         except etcd.EtcdException:
@@ -52,8 +53,11 @@ class Client(etcd.Client):
 
     def _do_http_request(self, request_executor, method, url, fields=None, **kwargs):
         try:
+            # logging.info("Making request to url %s: %s", url, method)
             response = request_executor(method, url, fields=fields, **kwargs)
+            # logging.info("Got response: %s", response)
             response.data.decode('utf-8')
+            # logging.info("Decoded response data: %s", response.data)
             self._check_cluster_id(response)
         except (urllib3.exceptions.HTTPError, HTTPException, socket.error) as e:
             if (isinstance(fields, dict) and fields.get("wait") == "true" and
@@ -194,6 +198,7 @@ class Etcd(AbstractDCS):
     def __init__(self, name, config):
         super(Etcd, self).__init__(name, config)
         self.ttl = config.get('ttl', 30)
+        # logging.info("Initializing etcd: %s", config)
         self._retry = Retry(deadline=10, max_delay=1, max_tries=-1,
                             retry_exceptions=(etcd.EtcdConnectionFailed,
                                               etcd.EtcdLeaderElectionInProgress,

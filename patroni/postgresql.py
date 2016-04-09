@@ -43,7 +43,7 @@ class Postgresql(object):
 
     def __init__(self, config):
         self.config = config
-        self.name = config['name']
+        self.name = os.environ.get('KUBE_NAME', None) or config['name']
         self.server_parameters = config.get('parameters', {})
         self.scope = config['scope']
         self.listen_addresses, self.port = config['listen'].split(':')
@@ -52,7 +52,8 @@ class Postgresql(object):
         self.superuser = config['superuser']
         self.admin = config['admin']
         self.initdb_options = config.get('initdb', [])
-        self.pgpass = config.get('pgpass') or os.path.join(os.path.expanduser('~'), 'pgpass')
+        self.pgpass = config.get('pgpass') or \
+                      os.path.join(os.path.expanduser('~'), 'pgpass')
         self.pg_rewind = config.get('pg_rewind', {})
         self.callback = config.get('callbacks', {})
         self.use_slots = config.get('use_slots', True)
@@ -66,7 +67,8 @@ class Postgresql(object):
 
         self._pg_ctl = ['pg_ctl', '-w', '-D', self.data_dir]
 
-        self.local_address = self.get_local_address()
+        self.local_address = os.environ.get('KUBE_NAME', None) or self.get_local_address()
+        logging.info("Using local address %s", self.local_address)
         connect_address = config.get('connect_address') or self.local_address
         self.connection_string = 'postgres://{username}:{password}@{connect_address}/postgres'.format(
             connect_address=connect_address, **self.replication)
@@ -120,6 +122,7 @@ class Postgresql(object):
 
     def get_local_address(self):
         listen_addresses = self.listen_addresses.split(',')
+        logging.info("get_local_address: %s", listen_addresses)
         local_address = listen_addresses[0].strip()  # take first address from listen_addresses
 
         for la in listen_addresses:
@@ -363,6 +366,8 @@ class Postgresql(object):
         env = os.environ.copy()
         if 'username' in self.superuser:
             env['PGUSER'] = self.superuser['username']
+        logging.info("Invoking pg_ctl with server options: %s",
+                     self.server_options())
         ret = subprocess.call(self._pg_ctl + ['start', '-o', self.server_options()], env=env, preexec_fn=os.setsid) == 0
 
         self.set_state('running' if ret else 'start failed')
@@ -742,7 +747,8 @@ $$""".format(name, options), name, password, password)
         if os.path.isdir(self.data_dir) and not self.is_running():
             try:
                 new_name = '{0}_{1}'.format(self.data_dir, time.strftime('%Y-%m-%d-%H-%M-%S'))
-                logger.info('renaming data directory to %s', new_name)
+                logger.info('renaming data directory %s to %s',
+                            self.data_dir, new_name)
                 os.rename(self.data_dir, new_name)
             except OSError:
                 logger.exception("Could not rename data directory %s", self.data_dir)
@@ -772,6 +778,7 @@ $$""".format(name, options), name, password, password)
         ret = 1
         for bbfailures in range(0, maxfailures):
             try:
+                logging.info("Executing pg_basebackup for dbname: %s", master_connection)
                 ret = subprocess.call(['pg_basebackup', '--pgdata=' + self.data_dir,
                                        '--xlog-method=stream', "--dbname=" + master_connection], env=env)
                 if ret == 0:
