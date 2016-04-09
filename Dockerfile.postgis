@@ -1,0 +1,85 @@
+# Docker file meant to be used to run a Postgres 9.5 with Postgis 2.2
+# installation.
+#
+# Inspired by the Postgres Dockerfile here:
+#
+# https://github.com/docker-library/postgres
+
+FROM debian:jessie
+MAINTAINER Ovidiu Predescu <ovidiu@jollyturns.com>
+
+# explicitly set user/group IDs
+RUN groupadd -r postgres --gid=999 && useradd -r -g postgres --uid=999 postgres
+
+# grab gosu for easy step-down from root
+ENV GOSU_VERSION 1.7
+RUN set -x \
+	&& apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/* \
+	&& wget -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture)" \
+	&& wget -O /usr/local/bin/gosu.asc "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture).asc" \
+	&& export GNUPGHOME="$(mktemp -d)" \
+	&& gpg --keyserver ha.pool.sks-keyservers.net --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 \
+	&& gpg --batch --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu \
+	&& rm -r "$GNUPGHOME" /usr/local/bin/gosu.asc \
+	&& chmod +x /usr/local/bin/gosu \
+	&& gosu nobody true \
+	&& apt-get purge -y --auto-remove ca-certificates wget
+
+# make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
+RUN apt-get update && apt-get install -y locales && rm -rf /var/lib/apt/lists/* \
+	&& localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+ENV LANG en_US.utf8
+
+RUN apt-key adv --keyserver ha.pool.sks-keyservers.net --recv-keys B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+
+# Postgres requirements
+ENV POSTGIS_MAJOR 2.2
+ENV POSTGIS_VERSION 2.2.2+dfsg-1.pgdg80+1
+
+ENV PG_MAJOR 9.5
+ENV PG_VERSION 9.5.2-1.pgdg80+1
+
+RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ jessie-pgdg main' $PG_MAJOR > /etc/apt/sources.list.d/pgdg.list
+
+RUN apt-get update \
+	&& apt-get install -y postgresql-common \
+	&& sed -ri 's/#(create_main_cluster) .*$/\1 = false/' /etc/postgresql-common/createcluster.conf \
+	&& apt-get install -y \
+		postgresql-$PG_MAJOR=$PG_VERSION \
+		postgresql-contrib-$PG_MAJOR=$PG_VERSION
+
+RUN apt-get update \
+      && apt-get install -y --no-install-recommends \
+           postgresql-$PG_MAJOR-postgis-$POSTGIS_MAJOR=$POSTGIS_VERSION \
+           postgis=$POSTGIS_VERSION
+
+RUN apt-get install libpq-dev -y
+
+# Patroni requirements
+RUN apt-get install python python-dev python-pip -y
+ADD requirements.txt /requirements-py2.txt
+RUN pip install -r /requirements-py2.txt
+
+ENV PATH /usr/lib/postgresql/${PG_MAJOR}/bin:$PATH
+
+ADD patroni.py /patroni.py
+ADD patronictl.py /patronictl.py
+ADD patroni/ /patroni
+
+RUN ln -s /patroni.py /usr/local/bin/patroni
+RUN ln -s /patronictl.py /usr/local/bin/patronictl
+
+# RUN mkdir -p /var/lib/postgresql/data
+# RUN touch /var/lib/postgresql/data/recovery.conf
+RUN chown -R postgres:postgres /patroni/ /var/lib/postgresql
+
+RUN apt-get install dnsutils -y
+
+EXPOSE 5432 8008
+
+# ENTRYPOINT ["/usr/bin/python", "-u", "/patroni.py"]
+
+ADD docker/entrypoint-postgis.sh /entrypoint.sh
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+
+USER postgres
