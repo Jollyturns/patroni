@@ -48,9 +48,37 @@ class Postgresql(object):
         self.scope = config['scope']
         self.listen_addresses, self.port = config['listen'].split(':')
         self.data_dir = config['data_dir']
-        self.replication = config['replication']
-        self.superuser = config['superuser']
-        self.admin = config['admin']
+
+        self.replication = config.get('replication')
+        if not self.replication:
+            self.replication = {}
+        replication_username = os.environ.get('REPLICATION_USERNAME')
+        if replication_username:
+            self.replication['username'] = replication_username
+        replication_password = os.environ.get('REPLICATION_PASSWORD')
+        if replication_password:
+            self.replication['password'] = replication_password
+
+        self.superuser = config.get('superuser')
+        if not self.superuser:
+            self.superuser = {}
+        superuser_username = os.environ.get('SUPERUSER_USERNAME')
+        if superuser_username:
+            self.superuser['username'] = superuser_username
+        superuser_password = os.environ.get('SUPERUSER_PASSWORD')
+        if superuser_password:
+            self.superuser['password'] = superuser_password
+
+        self.admin = config.get('admin')
+        if not self.admin:
+            self.admin = {}
+        admin_username = os.environ.get('ADMIN_USERNAME')
+        if admin_username:
+            self.admin['username'] = admin_username
+        admin_password = os.environ.get('ADMIN_PASSWORD')
+        if admin_password:
+            self.admin['password'] = admin_password
+
         self.initdb_options = config.get('initdb', [])
         self.pgpass = config.get('pgpass') or \
                       os.path.join(os.path.expanduser('~'), 'pgpass')
@@ -67,7 +95,7 @@ class Postgresql(object):
 
         self._pg_ctl = ['pg_ctl', '-w', '-D', self.data_dir]
 
-        self.local_address = os.environ.get('KUBE_NAME', None) or self.get_local_address()
+        self.local_address = os.environ.get('KUBE_NAME') or self.get_local_address()
         logging.info("Using local address %s", self.local_address)
         connect_address = config.get('connect_address') or self.local_address
         self.connection_string = 'postgres://{username}:{password}@{connect_address}/postgres'.format(
@@ -366,8 +394,6 @@ class Postgresql(object):
         env = os.environ.copy()
         if 'username' in self.superuser:
             env['PGUSER'] = self.superuser['username']
-        logging.info("Invoking pg_ctl with server options: %s",
-                     self.server_options())
         ret = subprocess.call(self._pg_ctl + ['start', '-o', self.server_options()], env=env, preexec_fn=os.setsid) == 0
 
         self.set_state('running' if ret else 'start failed')
