@@ -2,14 +2,10 @@
 
 echo Current user: `whoami`
 
-# echo Changing ownership
-# chown -R postgres:postgres /var/lib/postgresql
-
 nslookup etcd0
 
-nslookup patroni-postgres
-
-# echo Password is: $POSTGRES_PASSWORD
+echo Changing ownership
+chown -R postgres:postgres /var/lib/postgresql
 
 echo Contents of /var/lib/postgresql/:
 ls -alF /var/lib/postgresql/
